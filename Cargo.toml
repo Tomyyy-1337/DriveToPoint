@@ -1,0 +1,8 @@
+[package]
+name = "drive_to_point"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nannou = "0.19.0"
+rand = "0.9.1"
