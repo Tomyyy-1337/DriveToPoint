@@ -54,18 +54,17 @@ impl DriveToPointBehavior {
 
 
     fn output(&self, model: &Model) -> (f32, f32) {
-        let speed = 2.0;
+        let speed = 1.0;
 
         let dist = model.tracktor_position.distance(model.target_position);
 
         let d = dist / 2.0;
-        let d2 = d.max(250.0);
+        let d = d.max(400.0);
 
         let p0 = model.tracktor_position;
-        let p1 = model.tracktor_position + Vec2::new(0.0, d).rotate(model.tracktor_angle);
-        
+
         let z0 = model.target_position;
-        let z1 = model.target_position + Vec2::new(0.0, d2).rotate(model.target_angle + PI);
+        let z1 = model.target_position + Vec2::new(0.0, d).rotate(model.target_angle + PI);
 
         // let t = match dist {
         //     ..200.0 => 1.0,
@@ -81,9 +80,7 @@ impl DriveToPointBehavior {
         
         let t = t.clamp(0.1, 1.0);
 
-
-
-        let target = (1.0 - t).powi(3) * p0 + 3.0 * (1.0 - t).powi(2) * t * p1 + 3.0 * (1.0 - t) * t.powi(2) * z1 + t.powi(3) * z0;
+        let target = (1.0 - t).powi(2) * p0 + 2.0 * (1.0 - t) * t * z1 + t.powi(2) * z0;
         
         
         let angle = (target - model.tracktor_position).angle() - PI / 2.0;
@@ -119,7 +116,7 @@ fn model(app: &App) -> Model {
         tracktor_angle: PI,
         tracktor_speed: 0.0,
         target_position: Vec2::new(400.0, 400.0),
-        target_angle: 0.0,
+        target_angle: PI,
         obstacles: vec![
             Obstacle {
                 position: Vec2::new(200.0, 200.0),
@@ -144,8 +141,10 @@ fn update(_app: &App, model: &mut Model, update: Update) {
     let (speed, angle) = model.drive_to_point_behavior.output(model);
     let speed_diff = (speed - model.tracktor_speed).clamp(-0.5, 0.5);
     model.tracktor_speed += speed_diff * update.since_last.as_secs_f32();
+
+    let angle = angle.clamp(-0.5, 0.5);
     
-    model.tracktor_angle += angle * update.since_last.as_secs_f32() * model.tracktor_speed * 1.0;
+    model.tracktor_angle += angle * update.since_last.as_secs_f32() * model.tracktor_speed;
 
     // Update tracktor position based on speed and angle
     model.tracktor_position.x -= model.tracktor_speed * model.tracktor_angle.sin() * update.since_last.as_secs_f32() * 50.0;
@@ -193,18 +192,13 @@ fn view(app: &App, model: &Model, frame: Frame) {
     // draw Bezier curve
     let dist = model.tracktor_position.distance(model.target_position);
     let d = dist / 2.0;
-    let d2 = d.max(250.0);
+    let d = d.max(400.0);
 
     let p0 = model.tracktor_position;
-    let p1 = model.tracktor_position + Vec2::new(0.0, d).rotate(model.tracktor_angle);
     
     let z0 = model.target_position;
-    let z1 = model.target_position + Vec2::new(0.0,  d2).rotate(model.target_angle + PI);
+    let z1 = model.target_position + Vec2::new(0.0,  d).rotate(model.target_angle + PI);
 
-    draw.ellipse()
-        .xy(p1)
-        .radius(5.0)
-        .color(YELLOW);
 
     draw.ellipse()
         .xy(z1)
@@ -212,14 +206,13 @@ fn view(app: &App, model: &Model, frame: Frame) {
         .color(YELLOW);
 
     draw.polyline()
-        .points(vec![p0, p1, z1, z0])
+        .points(vec![p0, z1, z0])
         .color(WHITE);
 
-    let curve = (0..=101)
+    let curve = (0..=100)
         .map(|i| {
             let t = i as f32 / 100.0;
-            (1.0 - t).powi(3) * p0 + 3.0 * (1.0 - t).powi(2) * t * p1 + 3.0 * (1.0 - t) * t.powi(2) * z1 + t.powi(3) * z0
-            
+            (1.0 - t).powi(2) * p0 + 2.0 * (1.0 - t) * t * z1 + t.powi(2) * z0
         })
         .collect::<Vec<_>>();
     
@@ -233,10 +226,8 @@ fn view(app: &App, model: &Model, frame: Frame) {
     //     };
 
     let follow_point_dist = 150.0;
-        let t = follow_point_dist / dist;
-        
-        let t = t.clamp(0.1, 1.0);
-
+    let t = follow_point_dist / dist;
+    let t = t.clamp(0.1, 1.0);
     let indx = (t * 100.0) as usize;
 
     draw.ellipse()
