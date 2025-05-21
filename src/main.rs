@@ -1,4 +1,4 @@
-use nannou::{draw::{self, properties::spatial::position}, prelude::*};
+use nannou::{draw::{self}, prelude::*};
 
 fn main() {
     nannou::app(model).update(update).run();
@@ -21,7 +21,7 @@ struct Model {
 impl Model {
     fn new_target(&mut self) {
         let (angle, position) = 'outer: loop {
-            let angle = random_f32() * 2.0 * PI;
+            let angle = self.target_angle + random_range(-PI / 2.0, PI / 2.0);
             let position = Vec2::new(
                 random_range(-500.0, 500.0),
                 random_range(-500.0, 500.0),
@@ -74,8 +74,6 @@ impl AvoidObstacleBehavior {
     }
 }
 
-
-
 struct DriveToPointBehavior {
     target_position: Vec2,
     target_angle: f32,
@@ -94,7 +92,6 @@ impl DriveToPointBehavior {
             inhibitance: 0.0,
         }
     }
-
 
     fn output(&self, model: &Model) -> (f32, f32) {
         let speed = 10.0;
@@ -164,7 +161,6 @@ fn update(_app: &App, model: &mut Model, update: Update) {
     model.tracktor_position.x -= model.tracktor_speed * model.tracktor_angle.sin() * update.since_last.as_secs_f32() * 50.0;
     model.tracktor_position.y += model.tracktor_speed * model.tracktor_angle.cos() * update.since_last.as_secs_f32() * 50.0;
 
-
     if model.tracktor_position.distance(model.target_position) < 50.0 && normalize_angle(model.tracktor_angle - model.target_angle).abs() < 0.65 {
         model.new_target();
     }
@@ -185,7 +181,7 @@ fn generate_bezier_params(tractor_pos: Vec2, target_pos: Vec2, tracktor_angle: f
     
     if angle_diff(tracktor_angle, target_angle).abs() > PI / 1.5 {
         p1 += Vec2::new(0.0, 100.0).rotate(direction_to_target);
-        t = 0.75;
+        t = 0.70;
     }
     
     let points = [p0, p1, p2, p3];
