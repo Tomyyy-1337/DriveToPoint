@@ -14,6 +14,7 @@ struct Model {
     target_position: Vec2,
     target_angle: f32,
     obstacles: Vec<Obstacle>,
+    state: State,
     drive_to_point_behavior: DriveToPointBehavior,
     avoid_obstacle_behavior: AvoidObstacleBehavior,
 }
@@ -109,11 +110,33 @@ impl DriveToPointBehavior {
     }
 }
 
+fn generate_bezier_params(tractor_pos: Vec2, target_pos: Vec2, tracktor_angle: f32, target_angle: f32) -> ([Vec2; 4], f32) {
+    let follow_point_dist = 220.0;
+    let dist = tractor_pos.distance(target_pos);
+    let t = follow_point_dist / dist;
+    let mut t = t.clamp(0.1, 1.0);
+
+    let direction_to_target = (target_pos - tractor_pos).angle();
+    
+    let p0 = tractor_pos;
+    let mut p1 = tractor_pos + Vec2::new(0.0, 150.0).rotate(tracktor_angle);
+    let p2 = target_pos + Vec2::new(0.0, 500.0).rotate(target_angle + PI);
+    let p3 = target_pos;
+    
+    if angle_diff(tracktor_angle, target_angle).abs() > PI / 1.3 {
+        p1 += Vec2::new(0.0, 100.0).rotate(direction_to_target);
+        t = 0.75;
+    }
+    
+    let points = [p0, p1, p2, p3];
+    
+    return (points, t);
+}
+
 struct Obstacle {
     position: Vec2,
     radius: f32,
 }
-
 
 fn model(app: &App) -> Model {
     // Create a window that can receive user input like mouse and keyboard events.
@@ -135,6 +158,7 @@ fn model(app: &App) -> Model {
                 radius: 200.0,
             },
         ],
+        state: State::DriveToPoint,
         drive_to_point_behavior: DriveToPointBehavior::new(),
         avoid_obstacle_behavior: AvoidObstacleBehavior::new(),
     };
@@ -145,6 +169,11 @@ fn model(app: &App) -> Model {
     model
 }
 
+enum State {
+    DriveToPoint,
+    AvoidObstacle,
+}
+
 fn update(_app: &App, model: &mut Model, update: Update) {
     let (speed, angle) = model.drive_to_point_behavior.output(model);
     let speed_diff = (speed - model.tracktor_speed).clamp(-0.5, 0.5);
@@ -152,8 +181,10 @@ fn update(_app: &App, model: &mut Model, update: Update) {
 
     let avoid_obstacle_angle = model.avoid_obstacle_behavior.output(model);
     if avoid_obstacle_angle != 0.0 {
+        model.state = State::AvoidObstacle;
         model.tracktor_angle += avoid_obstacle_angle * update.since_last.as_secs_f32() * model.tracktor_speed * 1.0;
     } else {
+        model.state = State::DriveToPoint;
         model.tracktor_angle += angle * update.since_last.as_secs_f32() * model.tracktor_speed * 1.0;
     }
 
@@ -165,30 +196,6 @@ fn update(_app: &App, model: &mut Model, update: Update) {
         model.new_target();
     }
 }
-
-fn generate_bezier_params(tractor_pos: Vec2, target_pos: Vec2, tracktor_angle: f32, target_angle: f32) -> ([Vec2; 4], f32) {
-    let follow_point_dist = 250.0;
-    let dist = tractor_pos.distance(target_pos);
-    let t = follow_point_dist / dist;
-    let mut t = t.clamp(0.1, 1.0);
-
-    let direction_to_target = (target_pos - tractor_pos).angle();
-    
-    let p0 = tractor_pos;
-    let mut p1 = tractor_pos + Vec2::new(0.0, 200.0).rotate(tracktor_angle);
-    let p2 = target_pos + Vec2::new(0.0, 500.0).rotate(target_angle + PI);
-    let p3 = target_pos;
-    
-    if angle_diff(tracktor_angle, target_angle).abs() > PI / 1.5 {
-        p1 += Vec2::new(0.0, 100.0).rotate(direction_to_target);
-        t = 0.70;
-    }
-    
-    let points = [p0, p1, p2, p3];
-    
-    return (points, t);
-}
-
 
 fn bezier_point(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: f32) -> Vec2 {
     let u = 1.0 - t;
@@ -214,7 +221,10 @@ fn view(app: &App, model: &Model, frame: Frame) {
         .xy(model.tracktor_position)
         .w_h(TRACKTOR_WIDTH, TRACKTOR_LENGTH)
         .rotate(model.tracktor_angle)
-        .color(BLUE);
+        .color(match model.state {
+            State::DriveToPoint => BLUE,
+            State::AvoidObstacle => RED,
+        });
 
     draw.ellipse()
         .xy(model.target_position)
