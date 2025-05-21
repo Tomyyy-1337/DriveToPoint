@@ -54,24 +54,14 @@ impl DriveToPointBehavior {
 
 
     fn output(&self, model: &Model) -> (f32, f32) {
-        let speed = 2.0;
+        let speed = 10.0;
 
-        let t = optimal_t(model.tracktor_position, model.target_position, model.tracktor_angle, model.target_angle);
-
-        let [p0, p1, z1, z0] = generate_base_points(model.tracktor_position, model.tracktor_angle, model.target_position, model.target_angle);
+        let ([p0, p1, z1, z0], t) = generate_bezier_params(model.tracktor_position, model.target_position, model.tracktor_angle, model.target_angle);
 
         let target = bezier_point(p0, p1, z1, z0, t);
         
-        
         let angle = (target - model.tracktor_position).angle() - PI / 2.0;
-        let mut angle = angle - model.tracktor_angle;
-
-        while angle > PI {
-            angle -= PI * 2.0;
-        }
-        while angle < -PI {
-            angle += PI * 2.0;
-        }
+        let angle = angle_diff(angle, model.tracktor_angle);
 
         let angle = angle.clamp(-1.0, 1.0);
 
@@ -97,7 +87,7 @@ fn model(app: &App) -> Model {
         tracktor_position: Vec2::new(-300.0, -300.0),
         tracktor_angle: PI,
         tracktor_speed: 0.0,
-        target_position: Vec2::new(400.0, 400.0),
+        target_position: Vec2::new(400.0, 300.0),
         target_angle: PI,
         obstacles: vec![
             Obstacle {
@@ -117,7 +107,6 @@ fn model(app: &App) -> Model {
 
     model
 }
-
 
 fn update(_app: &App, model: &mut Model, update: Update) {
     let (speed, angle) = model.drive_to_point_behavior.output(model);
@@ -169,6 +158,32 @@ fn optimal_t(tractor_pos: Vec2, target_pos: Vec2, tracktor_angle: f32, target_an
     t.clamp(0.1, 1.0)
 }
 
+fn generate_bezier_params(tractor_pos: Vec2, target_pos: Vec2, tracktor_angle: f32, target_angle: f32) -> ([Vec2; 4], f32) {
+    let follow_point_dist = 250.0;
+    let dist = tractor_pos.distance(target_pos);
+    let t = follow_point_dist / dist;
+    let mut t = t.clamp(0.1, 1.0);
+
+    let distance_to_target = tractor_pos.distance(target_pos);
+    let direction_to_target = (target_pos - tractor_pos).angle();
+    
+    let p0 = tractor_pos;
+    let mut p1 = tractor_pos + Vec2::new(0.0, 200.0).rotate(tracktor_angle);
+    let mut p2 = target_pos + Vec2::new(0.0, 500.0).rotate(target_angle + PI);
+    let p3 = target_pos;
+    
+    if angle_diff(tracktor_angle, target_angle).abs() > PI / 1.5 {
+        p1 += Vec2::new(0.0, 100.0).rotate(direction_to_target);
+        t = 0.75;
+    }
+    
+    let points = [p0, p1, p2, p3];
+    
+
+    return (points, t);
+}
+
+
 fn bezier_point(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: f32) -> Vec2 {
     let u = 1.0 - t;
     let tt = t * t;
@@ -213,7 +228,10 @@ fn view(app: &App, model: &Model, frame: Frame) {
         .weight(5.0);
 
     // draw Bezier curve
-    let [p0, p1, z1, z0] = generate_base_points(model.tracktor_position, model.tracktor_angle, model.target_position, model.target_angle);
+    // let [p0, p1, z1, z0] = generate_base_points(model.tracktor_position, model.tracktor_angle, model.target_position, model.target_angle);
+    // let t = optimal_t(model.tracktor_position, model.target_position, model.tracktor_angle, model.target_angle);
+
+    let ([p0, p1, z1, z0], t) = generate_bezier_params(model.tracktor_position, model.target_position, model.tracktor_angle, model.target_angle);
 
     draw.ellipse()
         .xy(p1)
@@ -245,7 +263,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
     //         _ => 0.0,
     //     };
 
-    let t = optimal_t(model.tracktor_position, model.target_position, model.tracktor_angle, model.target_angle);
 
     let indx = (t * 100.0) as usize;
 
@@ -271,4 +288,13 @@ fn normalize_angle(angle: f32) -> f32 {
         angle += PI * 2.0;
     }
     angle
+}
+
+fn angle_diff(a: f32, b: f32) -> f32 {
+    let angle = (a - b + PI) % (2.0 * PI) - PI;
+    if angle < -PI {
+        angle + 2.0 * PI
+    } else {
+        angle
+    }
 }
