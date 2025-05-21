@@ -15,22 +15,65 @@ struct Model {
     target_angle: f32,
     obstacles: Vec<Obstacle>,
     drive_to_point_behavior: DriveToPointBehavior,
+    avoid_obstacle_behavior: AvoidObstacleBehavior,
 }
 
 impl Model {
     fn new_target(&mut self) {
-        let angle = random_f32() * 2.0 * PI;
-        let position = Vec2::new(
-            random_range(-500.0, 500.0),
-            random_range(-500.0, 500.0),
-        );
+        let (angle, position) = 'outer: loop {
+            let angle = random_f32() * 2.0 * PI;
+            let position = Vec2::new(
+                random_range(-500.0, 500.0),
+                random_range(-500.0, 500.0),
+            );
 
+            for obstacle in self.obstacles.iter() {
+                let dist = position.distance(obstacle.position);
+                if dist < obstacle.radius + 200.0 {
+                    continue 'outer;
+                }
+            }
+            break (angle, position);
+        };
+            
         self.target_position = position;
         self.target_angle = angle;
         self.drive_to_point_behavior.target_position = position;
         self.drive_to_point_behavior.target_angle = angle;
     }
 }
+
+struct AvoidObstacleBehavior {
+    // Meta signal input
+    stimulation: f32,
+    inhibitance: f32,
+}
+
+impl AvoidObstacleBehavior {
+    fn new() -> Self {
+        Self {
+            stimulation: 0.0,
+            inhibitance: 0.0,
+        }
+    }
+
+    fn output(&self, model: &Model) -> f32 {     
+        for obstacle in model.obstacles.iter() {
+            let dist = model.tracktor_position.distance(obstacle.position);
+            let angle_to_obstacle = (obstacle.position - model.tracktor_position).angle();
+            
+            let angle_diff = angle_diff(angle_to_obstacle, model.tracktor_angle);
+
+            if dist < obstacle.radius + 70.0  {
+                let angle = angle_diff;
+                return angle.clamp(-1.0, 1.0);
+            }
+
+        }
+        0.0
+    }
+}
+
 
 
 struct DriveToPointBehavior {
@@ -91,15 +134,12 @@ fn model(app: &App) -> Model {
         target_angle: PI,
         obstacles: vec![
             Obstacle {
-                position: Vec2::new(200.0, 200.0),
-                radius: 100.0,
-            },
-            Obstacle {
-                position: Vec2::new(-200.0, 200.0),
-                radius: 100.0,
+                position: Vec2::new(0.0, 0.0),
+                radius: 200.0,
             },
         ],
         drive_to_point_behavior: DriveToPointBehavior::new(),
+        avoid_obstacle_behavior: AvoidObstacleBehavior::new(),
     };
 
     model.drive_to_point_behavior.target_position = model.target_position;
@@ -112,8 +152,13 @@ fn update(_app: &App, model: &mut Model, update: Update) {
     let (speed, angle) = model.drive_to_point_behavior.output(model);
     let speed_diff = (speed - model.tracktor_speed).clamp(-0.5, 0.5);
     model.tracktor_speed += speed_diff * update.since_last.as_secs_f32();
-    
-    model.tracktor_angle += angle * update.since_last.as_secs_f32() * model.tracktor_speed * 1.0;
+
+    let avoid_obstacle_angle = model.avoid_obstacle_behavior.output(model);
+    if avoid_obstacle_angle != 0.0 {
+        model.tracktor_angle += avoid_obstacle_angle * update.since_last.as_secs_f32() * model.tracktor_speed * 1.0;
+    } else {
+        model.tracktor_angle += angle * update.since_last.as_secs_f32() * model.tracktor_speed * 1.0;
+    }
 
     // Update tracktor position based on speed and angle
     model.tracktor_position.x -= model.tracktor_speed * model.tracktor_angle.sin() * update.since_last.as_secs_f32() * 50.0;
@@ -125,51 +170,17 @@ fn update(_app: &App, model: &mut Model, update: Update) {
     }
 }
 
-fn generate_base_points(p0: Vec2, p0_dir: f32, p1: Vec2, p1_dir: f32) -> [Vec2; 4] {
-    let dist = p0.distance(p1);
-    let d = 200.0;
-    let d2 = (dist / 2.0).max(400.0);
-    let p3 = p0 + Vec2::new(0.0, d).rotate(p0_dir);
-    let p4 = p1 + Vec2::new(0.0, d2).rotate(p1_dir + PI);
-    
-    if PI - normalize_angle(p1_dir - p0_dir).abs() < 1.2 {
-        let dir_to_target = (p1 - p0).angle();
-        let offset = if normalize_angle(p1_dir - p0_dir).abs() > PI {
-            -PI / 4.0
-        } else {
-            PI / 4.0
-        };
-        let p0_dir = normalize_angle(dir_to_target + PI / 2.0);
-        let p3 = p0 + Vec2::new(0.0, d).rotate(p0_dir - offset);
-        let p4 = p1 + Vec2::new(0.0, d2*1.2).rotate(p1_dir + PI + offset);
-        return [p0, p3, p4, p1];
-    } 
-
-    [p0, p3, p4, p1]
-}
-
-fn optimal_t(tractor_pos: Vec2, target_pos: Vec2, tracktor_angle: f32, target_angle: f32) -> f32 {
-    let follow_point_dist = 250.0;
-    let dist = tractor_pos.distance(target_pos);
-    let t = follow_point_dist / dist;
-    if dist <= 280.0 && PI - normalize_angle(target_angle - tracktor_angle).abs() < 1.3 {
-        return 0.5;
-    }
-    t.clamp(0.1, 1.0)
-}
-
 fn generate_bezier_params(tractor_pos: Vec2, target_pos: Vec2, tracktor_angle: f32, target_angle: f32) -> ([Vec2; 4], f32) {
     let follow_point_dist = 250.0;
     let dist = tractor_pos.distance(target_pos);
     let t = follow_point_dist / dist;
     let mut t = t.clamp(0.1, 1.0);
 
-    let distance_to_target = tractor_pos.distance(target_pos);
     let direction_to_target = (target_pos - tractor_pos).angle();
     
     let p0 = tractor_pos;
     let mut p1 = tractor_pos + Vec2::new(0.0, 200.0).rotate(tracktor_angle);
-    let mut p2 = target_pos + Vec2::new(0.0, 500.0).rotate(target_angle + PI);
+    let p2 = target_pos + Vec2::new(0.0, 500.0).rotate(target_angle + PI);
     let p3 = target_pos;
     
     if angle_diff(tracktor_angle, target_angle).abs() > PI / 1.5 {
@@ -179,7 +190,6 @@ fn generate_bezier_params(tractor_pos: Vec2, target_pos: Vec2, tracktor_angle: f
     
     let points = [p0, p1, p2, p3];
     
-
     return (points, t);
 }
 
@@ -198,12 +208,12 @@ fn view(app: &App, model: &Model, frame: Frame) {
     let draw = draw::Draw::new();
     draw.background().color(BLACK);
 
-    // for obstacle in &model.obstacles {
-    //     draw.ellipse()
-    //         .xy(obstacle.position)
-    //         .radius(obstacle.radius)
-    //         .color(PURPLE);
-    // }
+    for obstacle in &model.obstacles {
+        draw.ellipse()
+            .xy(obstacle.position)
+            .radius(obstacle.radius)
+            .color(PURPLE);
+    }
     draw.rect()
         .xy(model.tracktor_position)
         .w_h(TRACKTOR_WIDTH, TRACKTOR_LENGTH)
@@ -227,10 +237,6 @@ fn view(app: &App, model: &Model, frame: Frame) {
         .color(BLUE)
         .weight(5.0);
 
-    // draw Bezier curve
-    // let [p0, p1, z1, z0] = generate_base_points(model.tracktor_position, model.tracktor_angle, model.target_position, model.target_angle);
-    // let t = optimal_t(model.tracktor_position, model.target_position, model.tracktor_angle, model.target_angle);
-
     let ([p0, p1, z1, z0], t) = generate_bezier_params(model.tracktor_position, model.target_position, model.tracktor_angle, model.target_angle);
 
     draw.ellipse()
@@ -253,21 +259,11 @@ fn view(app: &App, model: &Model, frame: Frame) {
             bezier_point(p0, p1, z1, z0, t)            
         })
         .collect::<Vec<_>>();
-    
-    //     let t = match dist {
-    //         ..200.0 => 0.99,
-    //         200.0..300.0 => 0.9,
-    //         300.0..=400.0 => 0.7,
-    //         400.0..=500.0 => 0.5,
-    //         300.0.. => 0.3,
-    //         _ => 0.0,
-    //     };
 
-
-    let indx = (t * 100.0) as usize;
+    let target_point = bezier_point(p0, p1, z1, z0, t);
 
     draw.ellipse()
-        .xy(curve[indx])
+        .xy(target_point)
         .radius(5.0)
         .color(RED);
     
